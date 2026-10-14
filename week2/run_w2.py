@@ -7,9 +7,10 @@ inner margin -> 3D colour histogram per block -> concatenation of the blocks -> 
              (level weights 1:2:4:8, finer levels weigh more)
     method2: HSV, 8x6x6 bins (uniform), 5x5 blocks
 
-Background removal for QST2 (colour only): Gaussian model of the wall colour (robust mean / covariance in Lab of a strip
-along the image border) -> Mahalanobis distance -> Otsu threshold -> morphology, largest component, hole filling,
-row/column filling. The painting is then cropped with the bounding box of the mask.
+Background removal for QST2 (colour only): Gaussian model of the wall colour (robust mean / covariance in Lab of the
+15-pixel strip along the border of the full-resolution image, which the organisers guarantee to be wall) -> Mahalanobis
+distance -> Otsu threshold -> morphology, largest component, hole filling, row/column filling. The painting is then
+cropped with the bounding box of the mask.
 
 The week-2 instructions ask for a single method, so only method1 is submitted by default (method2 is the alternative we
 compared it with; use --all-methods to also generate it).
@@ -35,6 +36,7 @@ import numpy as np
 K = 10
 MAX_SIDE = 512
 WORK_SIDE = 400
+BORDER_PX = 15   # the organisers guarantee at least 15 px of wall on every side of the painting
 EPS = 1e-10
 
 SPACES = {"HSV": (cv2.COLOR_BGR2HSV, [(0, 180), (0, 256), (0, 256)]), "YCRCB": (cv2.COLOR_BGR2YCrCb, [(0, 256)] * 3)}
@@ -135,14 +137,19 @@ def otsu_threshold(v, nbins=256):
     return c[np.argmax(w0 * w1 * (m0 - m1) ** 2)]
 
 
-def compute_mask(img, border=0.04, keep=0.8):
+def border_pixels(img, t=BORDER_PX):
+    """Lab pixels of the t-pixel strip along the 4 borders of the full-resolution image (guaranteed to be wall)."""
+    lab = cv2.cvtColor(cv2.medianBlur(img, 5), cv2.COLOR_BGR2LAB)
+    strip = np.zeros(lab.shape[:2], bool)
+    strip[:t], strip[-t:], strip[:, :t], strip[:, -t:] = True, True, True, True
+    return lab[strip].astype(np.float64)
+
+
+def compute_mask(img, border_px=BORDER_PX, keep=0.8):
     H, W = img.shape[:2]
     lab = cv2.cvtColor(cv2.medianBlur(resize_max(img, WORK_SIDE), 5), cv2.COLOR_BGR2LAB).astype(np.float64)
     h, w = lab.shape[:2]
-    t = max(2, int(round(border * min(h, w))))
-    strip = np.zeros((h, w), bool)
-    strip[:t], strip[-t:], strip[:, :t], strip[:, -t:] = True, True, True, True
-    P = lab[strip]
+    P = border_pixels(img, border_px)                              # sampled at full resolution, not on the 400 px image
     d = np.linalg.norm(P - np.median(P, 0), axis=1)
     Pk = P[d <= np.quantile(d, keep)]                              # robust: dominant colour of the border = wall
     mu, cov = Pk.mean(0), np.cov(Pk.T) + np.eye(3)
@@ -165,6 +172,8 @@ def compute_mask(img, border=0.04, keep=0.8):
     for x in np.where(m.any(0))[0]:
         ys_ = np.where(m[:, x])[0]; cols[ys_[0]:ys_[-1] + 1, x] = True
     m = rows & cols
+    if not m.any():                                                # nothing found: keep the whole image rather than crash
+        m[:] = True
     return cv2.resize(m.astype(np.uint8), (W, H), interpolation=cv2.INTER_NEAREST).astype(bool)
 
 

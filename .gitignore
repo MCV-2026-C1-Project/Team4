@@ -10,3 +10,12 @@ __pycache__/
 
 # OS / editor
 .DS_Store
+
+# Datasets (not in the repo)
+week1/BBDD/
+week2/qsd*_w2/
+week2/qst*_w2/
+
+# Course material
+week2/*.pdf
+week2/*_report_tasks.pptx
