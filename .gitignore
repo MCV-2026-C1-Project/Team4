@@ -19,3 +19,9 @@ week2/qst*_w2/
 # Course material
 week2/*.pdf
 week2/*_report_tasks.pptx
+
+# Week 3 datasets and course material
+week3/BBDD/
+week3/qsd*_w3/
+week3/qst*_w3/
+week3/*.pdf
