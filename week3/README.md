@@ -1,25 +1,39 @@
-# C1 – Week 3: noise filtering, texture descriptors and retrieval of up to two paintings per photo
+# C1 – Week 3 · Team 4
 
-All the experiments and the reasons behind every choice are in `c1-week3.ipynb`; `explanation.md` explains the work in Spanish;
-`C1_W3_all_tests.xlsx` contains every experiment table.
+Noise filtering, texture descriptors and retrieval of up to two paintings per photo.
 
 ## Method (method1)
 
-**Task 1 – noise.** An image is noisy if more than 0.5 % of its pixels are *isolated impulses* (they differ by more than 40 grey
-levels from all their 8 neighbours; measured at full resolution with a dilation / erosion by a 3×3 ring). Only those images are
-filtered, with a **3×3 median applied twice** (best PSNR / SSIM among 12 linear and non-linear filters).
+### Task 1 – Noise removal
+1. Convert the photo to grey, at its original size.
+2. For each pixel, take the maximum and the minimum of its 8 neighbours (grey-level dilation / erosion with a 3×3 ring).
+3. A pixel is an **impulse** if it is more than 40 grey levels above that maximum or below that minimum.
+4. If more than **0.5 %** of the pixels are impulses, the photo is noisy.
+5. Only noisy photos are filtered, with a **3×3 median applied twice** (best PSNR / SSIM among 12 linear and non-linear filters).
 
-**Task 2 – texture descriptors** (grey image resized to a fixed square, per block): LBP (uniform, multi-scale and all 256 codes),
-block DCT (zig-zag, first N coefficients, no DC, block-normalised), Haar wavelets (mean |c| and std per sub-band and block) and HOG.
+### Task 2 – Texture descriptors
+All of them work on the grey image, resized to a fixed square and split into blocks.
+1. **LBP**: each pixel is compared with its 8 neighbours → an 8-bit code; histogram of codes per block (P=8, R=2, 256 codes, 10×10 blocks, χ²).
+2. **DCT**: per block, the first 36 coefficients in zig-zag order, without the DC term, block-normalised (4×4 blocks, L2).
+3. **Wavelet**: Haar, 3 levels; per sub-band and block, mean |c| and standard deviation, plus the approximation (8×8 blocks, L1).
+4. **HOG**: gradient of each pixel → per cell, a histogram of 8 directions, normalised per 2×2 block (128×128, 16-px cells, L2).
 
-**Task 3 – background removal, up to two paintings.** Team 8's W2 wall model (the wall chroma a, b as a quadratic function of the
-lightness L, robust fit on a **1 %** border strip, Mahalanobis distance ≤ 5.5) → wall = wall-like pixels connected to the border →
-up to 2 components → per painting: hole filling, trimming of sparse rows/columns, row/column span filling and quadrilateral fit →
-paintings whose colour equals the wall are recovered from enclosed edges → left-to-right order.
+### Task 3 – Background removal (up to two paintings)
+1. Take a thin strip (1 %) along the border of the photo as samples of the wall.
+2. Model the wall: its colour (a, b in Lab) as a function of its brightness (L), with a robust fit, so lighting changes do not matter.
+3. A pixel is **wall-like** if its colour is close to the colour the wall would have at its brightness (Mahalanobis distance ≤ 5.5).
+4. **Wall** = wall-like pixels connected to the border of the photo.
+5. Everything else is a painting candidate; keep the **2 largest** regions (≥ 2 % of the photo, the 2nd at least 10 % of the 1st).
+6. Clean each painting: fill holes, remove sparse rows / columns, fill each row and column, fit a quadrilateral.
+7. If fewer than 2 paintings were found, look for nearly rectangular regions closed by edges (paintings with the colour of the wall).
+8. Order the paintings from left to right.
 
-**Retrieval.** For each painting (bounding-box crop): **HOG** (128×128, 16-px cells, 2×2 blocks, 8 orientations, L2) +
-**Haar wavelet** (256×256, 3 levels, 8×8 blocks, L1) + our **W2 colour descriptor** (YCrCb 3D pyramid, Hellinger). For each query
-the three distance vectors are z-scored over the 287 BBDD images and added (late fusion).
+### Task 4 – Retrieval
+1. Remove the noise (Task 1) and find the paintings (Task 3).
+2. Crop each painting by its bounding box.
+3. Describe it with **HOG + Haar wavelet + colour** (our week-2 descriptor: YCrCb 3D histogram, spatial pyramid, Hellinger).
+4. For each descriptor, compute the distances to the 287 BBDD images and z-score them (subtract the mean, divide by the std).
+5. Add the three z-scored distances and return the 10 closest paintings.
 
 ## Results on the development sets
 
@@ -36,14 +50,12 @@ the three distance vectors are z-scored over the 287 BBDD images and added (late
 ## How to run
 
 ```
-week3/
-├── c1-week3.ipynb      all the experiments (≈20 min)
-├── run_w3.py           test predictions only (< 2 min)
+week3_submission/
+├── run_w3.py           predictions for the test sets (< 2 min)
 ├── requirements.txt
-├── BBDD/               museum database (or ../week2/week2_submission/BBDD, ../week1/BBDD)
+├── BBDD/               museum database
 ├── qsd1_w3/, qsd2_w3/  development sets (as downloaded)
-├── qsd1_w2/, qsd2_w2/  optional, extra validation in the notebook (or ../week2/...)
-└── qst1_w3/, qst2_w3/  test sets (published Thursday 22 Oct)
+└── qst_w3/             test sets: qst1_w3/, qst2_w3/
 ```
 
 ```bash
