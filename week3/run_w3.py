@@ -1,27 +1,30 @@
 """
-C1 - Week 3 - Task 5: predictions for the blind test sets QST1 and QST2 (one method: method1)
+C1 - Week 3 - Task 5: predictions for the blind test sets QST1 and QST2 (one method: method1).
+Same pipeline as the notebook c1-week3.ipynb (all the experiments and the reasons behind each choice are there).
 
 method1
   1. Noise (Task 1): an image is noisy if more than 0.5% of its pixels are isolated impulses (they differ by > 40 grey levels
      from all their 8 neighbours, measured at full resolution). Noisy images are filtered with a 3x3 median applied twice.
-  2. Paintings (Task 3, QST2 only): The wall chroma a,b as a quadratic function of the lightness L,
-     robust fit on a 1% border strip -> Mahalanobis distance <= 5.5 = wall-like -> wall = wall-like pixels connected to
+  2. Paintings (Task 3, QST2 only): Team 8's wall model (the wall chroma a,b as a quadratic function of the lightness L,
+     robust fit on a 1% border strip) -> Mahalanobis distance <= 5.5 = wall-like -> wall = wall-like pixels connected to
      the border -> up to 2 components (>= 2% of the photo, the second >= 10% of the first) -> per painting: fill holes,
      trim sparse rows/columns, row/column span fill, quadrilateral fit -> edge recovery of paintings with the colour of the
      wall (only if fewer than 2 were found) -> paintings ordered left to right (top to bottom if stacked).
   3. Descriptors of each painting (bounding-box crop, longest side <= 512 px):
-       HOG      128x128 grey, 16x16 cells, 2x2 blocks, 8 orientations, L2
+       LBP      256-code spatial histograms, 256x256 grey, 10x10 blocks, L1
+       DCT      4x4 block DCT, 36 zig-zag coefficients without DC, L1
        wavelet  256x256 grey, Haar, 3 levels, 8x8 blocks, mean|c| + std per sub-band + standardised approximation, L1
-       colour   week-2 method1: 5% margin, light normalised, YCrCb 3D 6x12x12 range bins, pyramid 1+2+4+8, Hellinger
-  4. Late fusion: per query, each distance vector is z-scored over the 287 BBDD images; the three are added.
+       Gabor    256x256 grey, 3 wavelengths, 6 orientations, 12x12 blocks, mean + std energy, L1
+  4. Late fusion: per query, each texture distance vector is z-scored over the 287 BBDD images; the four are added.
 
 Outputs (format of the week-3 instructions, with the extra list level):
     results/QST1/method1/result.pkl     [[[top-10]], [[top-10]], ...]          one list of paintings per query image
     results/QST2/method1/result.pkl     [[[p1 top-10], [p2 top-10]], [[...]], ...]
     results/QST2/method1/*.png          binary masks (0 / 255), same name and size as the query (00001.jpg -> 00001.png)
 
-Folders expected next to this script: BBDD/ (or ../week2/week2_submission/BBDD, ../week1/BBDD), qst1_w3/, qst2_w3/
-(and qsd1_w3/, qsd2_w3/ for --check). Sub-folders as downloaded (qst1_w3/qst1_w3/...) are found automatically.
+Folders expected next to this script: BBDD/ and qst_w3/qst1_w3/, qst_w3/qst2_w3/
+(the direct qst1_w3/ and qst2_w3/ names are also accepted). qsd1_w3/ and qsd2_w3/ can be added for --check.
+Nested downloaded folders are found automatically.
 
 Usage:
     python run_w3.py --check     # development results (QSD1-W3 / QSD2-W3) + test predictions
@@ -34,8 +37,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import pywt
-from skimage.feature import hog
+from task2_texture import desc_dct, desc_gabor, desc_lbp, desc_wavelet
 
 K = 10
 EPS = 1e-10
@@ -157,55 +159,18 @@ def crop(img, mask):
 
 
 # ----------------------------------------------------------------------------- descriptors
-def grey_square(img, size):
-    return cv2.resize(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY), (size, size), interpolation=cv2.INTER_AREA)
-
-def desc_hog(img):
-    v = hog(grey_square(img, 128), orientations=8, pixels_per_cell=(16, 16), cells_per_block=(2, 2), feature_vector=True).astype(np.float32)
-    return v / (np.linalg.norm(v) + EPS)
-
-def desc_wavelet(img, size=256, level=3, grid=8):
-    co = pywt.wavedec2(grey_square(img, size).astype(np.float32) / 255, 'haar', level=level)
-    a = co[0]; bands = [(a - a.mean()) / (a.std() + 1e-6)] + [b for lv in co[1:] for b in lv]; out = []
-    for b in bands:
-        h, w = b.shape; n = min(grid, h); ys, xs = np.linspace(0, h, n + 1).astype(int), np.linspace(0, w, n + 1).astype(int)
-        for i in range(n):
-            for j in range(n):
-                bb = b[ys[i]:ys[i + 1], xs[j]:xs[j + 1]]; out += [np.mean(np.abs(bb)), np.std(bb)]
-    v = np.array(out, np.float32); return v / (np.linalg.norm(v) + EPS)
-
-MARGIN, BINS, LEVELS, LWEIGHTS = 0.05, (6, 12, 12), (1, 2, 4, 8), (1, 2, 4, 8)
-def prepare_color(img):
-    h, w = img.shape[:2]; f = img[int(MARGIN * h):h - int(MARGIN * h), int(MARGIN * w):w - int(MARGIN * w)].astype(np.float32)
-    f = np.clip(f * (128 / (f.reshape(-1, 3).mean(0) + EPS)), 0, 255).astype(np.uint8)
-    return cv2.cvtColor(f, cv2.COLOR_BGR2YCrCb)
-
-class Colour:
-    def __init__(self, bbdd_imgs):
-        P = np.concatenate([prepare_color(x).reshape(-1, 3) for x in bbdd_imgs])
-        P = P[np.random.default_rng(0).choice(len(P), 300_000, replace=False)].astype(np.float64)
-        self.luts = []
-        for c, n in enumerate(BINS):
-            lo, hi = np.percentile(P[:, c], [0.5, 99.5]); e = np.linspace(lo, hi, n + 1); e[0], e[-1] = -1, 256
-            self.luts.append(np.clip(np.searchsorted(e[1:-1], np.arange(256), side='right'), 0, n - 1))
-    def __call__(self, img):
-        x = prepare_color(img); L = self.luts
-        idx = L[0][x[..., 0]] * BINS[1] * BINS[2] + L[1][x[..., 1]] * BINS[2] + L[2][x[..., 2]]
-        h, w = idx.shape; wts = np.asarray(LWEIGHTS, float) / np.sum(LWEIGHTS); out = []
-        for n, wl in zip(LEVELS, wts):
-            ys, xs = np.linspace(0, h, n + 1).astype(int), np.linspace(0, w, n + 1).astype(int)
-            for i in range(n):
-                for j in range(n):
-                    hb = np.bincount(idx[ys[i]:ys[i + 1], xs[j]:xs[j + 1]].ravel(), minlength=int(np.prod(BINS))).astype(np.float32)
-                    out.append(wl * hb / (hb.sum() + EPS) / (n * n))
-        return np.concatenate(out)
-
-
 class Retriever:
     def __init__(self, bbdd_imgs, bbdd_ids):
         self.ids = np.asarray(bbdd_ids)
-        self.colour = Colour(bbdd_imgs)
-        self.desc = {'hog': (desc_hog, 'L2'), 'wavelet': (desc_wavelet, 'L1'), 'colour': (self.colour, 'hellinger')}
+        # Task 2 was corrected to use only strict texture descriptors.  The
+        # same texture-only fusion is carried through Tasks 4 and 5 so the
+        # blind pipeline cannot silently reintroduce non-textural features.
+        self.desc = {
+            'lbp': (desc_lbp, 'L1'),
+            'dct': (desc_dct, 'L1'),
+            'wavelet': (desc_wavelet, 'L1'),
+            'gabor': (desc_gabor, 'L1'),
+        }
         self.db = {k: np.stack([f(x) for x in bbdd_imgs]) for k, (f, _) in self.desc.items()}
 
     def top_k(self, img, k=K):
@@ -260,7 +225,7 @@ def main():
     print(f'Loading BBDD from {bbdd} ...')
     paths = sorted(bbdd.glob('bbdd_*.jpg'), key=image_id)
     R = Retriever([resize_max(denoise(cv2.imread(str(p)))) for p in paths], [image_id(p) for p in paths])
-    print(f'  {len(paths)} paintings described (HOG + wavelet + colour)')
+    print(f'  {len(paths)} paintings described (LBP + DCT + wavelets + Gabor)')
 
     if args.check:
         q1, q2 = find_dir('qsd1_w3'), find_dir('qsd2_w3')
