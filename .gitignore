@@ -25,3 +25,10 @@ week3/BBDD/
 week3/qsd*_w3/
 week3/qst*_w3/
 week3/*.pdf
+
+# Week 4 datasets, course material and keypoint caches
+week4/BBDD/
+week4/qsd*_w4/
+week4/qst*_w4/
+week4/*.pdf
+week4/cache/
