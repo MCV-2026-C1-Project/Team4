@@ -26,5 +26,18 @@ week3/qsd*_w3/
 week3/qst*_w3/
 week3/*.pdf
 
+# Week 4 datasets, course material and keypoint caches
+week4/BBDD/
+week4/qsd*_w4/
+week4/qst*_w4/
+week4/*.pdf
+week4/cache/
+
+# Week 4 development material lives on the develop branch
+week4/figures.py
+week4/presentation/
+week4/results/figures/
+week4/results/dev_summary.md
+
 # Personal development material and report assets (keep out of main)
 martin_development/

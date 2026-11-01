@@ -1,0 +1,5 @@
+numpy>=1.26,<3
+opencv-python>=4.9,<5
+scikit-image>=0.22
+PyWavelets>=1.5
+matplotlib>=3.8
